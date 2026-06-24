@@ -26,3 +26,6 @@ __MACOSX/
 
 # Log files
 *.log
+
+# Allow package logo
+!man/figures/logo.png
