@@ -21,7 +21,7 @@ and turns it into a complete, reproducible analysis — with one function call o
 step by step.
 
 It was built and fully tested on a **MCF7 human breast cancer cell serum-starvation
-time-course experiment** (15 samples × 497 antibodies, Set208, May 2025) but works
+time-course experiment** (15 samples × 497 antibodies, Set208) but works
 with any MD Anderson RPPA Core output file.
 
 ---
@@ -47,7 +47,7 @@ metrics, and pairwise comparison sheets.
 | Replicates | 3 per time point |
 | Total samples | 15 |
 | Antibodies | 497 |
-| RPPA Set | Set208, May 2025 |
+| RPPA Set | Set208 |
 | Analyst | Amar Kumar |
 
 **Why serum starvation?** Removing serum (growth factors) from cell culture
