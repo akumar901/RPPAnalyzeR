@@ -1,248 +1,393 @@
-# RPPAnalyzeR <img src="man/figures/logo.png" align="right" height="100" alt="" />
+# RPPAnalyzeR <img src="man/figures/logo.png" align="right" height="140" alt="RPPAnalyzeR logo"/>
 
 > A complete R analysis pipeline for MD Anderson RPPA Core Excel output
 
 **Author:** Amar Kumar  
 **Version:** 0.1.0  
-**License:** MIT
+**License:** MIT  
 
 <!-- badges: start -->
-[![R-CMD-check](https://github.com/AmarKumar/RPPAnalyzeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/AmarKumar/RPPAnalyzeR/actions)
+[![R-CMD-check](https://github.com/akumar901/RPPAnalyzeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/akumar901/RPPAnalyzeR/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 <!-- badges: end -->
 
 ---
 
-## What does this package do?
+## What is RPPAnalyzeR?
 
-**RPPAnalyzeR** turns the messy, multi-sheet Excel workbook from the [MD Anderson Functional Proteomics RPPA Core](https://www.mdanderson.org/research/research-resources/core-facilities/functional-proteomics-rppa-core.html) into a complete, reproducible analysis — in one function call or step by step.
+**RPPAnalyzeR** is an R package that takes the Excel workbook produced by the
+[MD Anderson Functional Proteomics RPPA Core](https://www.mdanderson.org/research/research-resources/core-facilities/functional-proteomics-rppa-core.html)
+and turns it into a complete, reproducible analysis — with one function call or
+step by step.
 
-It was built and tested on a **MCF7 serum-starvation time-course experiment** (15 samples × 497 antibodies, Set208) but works with any MD Anderson RPPA Core output file.
+It was built and fully tested on a **MCF7 human breast cancer cell serum-starvation
+time-course experiment** (15 samples × 497 antibodies, Set208, May 2025) but works
+with any MD Anderson RPPA Core output file.
 
-### What it handles
+---
 
-- Imports **all 12 sheets** from the RPPA Core Excel file (L2/L3/L4 log2, linear, CHM, pairwise time-point comparison sheets, both QC sheets)
-- Parses the **disorganized 9-row metadata header** that MD Anderson uses — automatically
-- **QC filtering** by antibody score threshold and sample total protein
-- **Differential expression** across all time points vs. baseline (uses pre-computed p-values from CHM sheets or runs fresh t-tests)
-- Publication-ready **volcano plots**, **clustered heatmaps**, **time-course plots**, and **QC charts**
-- **Excel export** with coloured significant hits, all key sheets, and antibody metadata
+## Background — What is RPPA?
+
+**Reverse Phase Protein Array (RPPA)** is a high-throughput antibody-based
+proteomics platform. Lysates from your samples are printed onto nitrocellulose
+slides and probed with hundreds of validated antibodies simultaneously.
+
+The MD Anderson RPPA Core returns results as a multi-sheet Excel workbook
+containing raw signal, normalised values at multiple levels, quality control
+metrics, and pairwise comparison sheets.
+
+### About this dataset
+
+| Parameter | Value |
+|---|---|
+| Cell line | MCF7 human breast cancer cells |
+| Experiment type | Serum starvation time-course |
+| Condition | Cells switched from serum-containing → serum-free media |
+| Time points | 0h (baseline), 2h, 4h, 8h, 24h |
+| Replicates | 3 per time point |
+| Total samples | 15 |
+| Antibodies | 497 |
+| RPPA Set | Set208, May 2025 |
+| Analyst | Amar Kumar |
+
+**Why serum starvation?** Removing serum (growth factors) from cell culture
+media activates major signalling pathways as cells respond to nutrient
+deprivation. This is a classic model for studying PI3K/Akt/mTOR, MAPK/ERK,
+and cell cycle regulation dynamics in real time.
+
+---
+
+## Understanding the Input File
+
+The MD Anderson RPPA Core delivers a single `.xlsx` file containing 12 sheets.
+Here is what each sheet contains and whether you need it:
+
+| Sheet | Contents | Use |
+|---|---|---|
+| **L4 (log_2)** | Fully normalised log2 values — loading + batch corrected | ✅ PRIMARY — use for all analysis |
+| **L4 (CHM)** | L4 + antibody median centering | ✅ Use for heatmaps |
+| **L4 (linear)** | L4 converted to linear scale | ✅ Use for bar graphs only |
+| **L4 CHM 0h vs 2h/4h/8h/24h** | Pairwise comparisons with Log2FC and pre-computed P values | ✅ Use for quick DE results |
+| **Antibody QC Scores** | QC score per antibody (0–1 scale, min = 0.8) | ✅ Filter low-quality antibodies |
+| **Sample QC metrics** | Total protein content per sample | ✅ Flag failed samples |
+| **L3 (log_2)** | Loading-normalised only (intermediate step) | ⚠️ Intermediate only |
+| **L2 (log_2)** | Raw RPPASPACE output, no normalisation | ⚠️ Raw only |
+| **Report Software Versions** | Pipeline version info | ℹ️ Reference only |
+
+### Why is the L4 sheet so disorganised?
+
+The MD Anderson Excel file has a non-standard structure that confuses
+standard Excel readers:
+
+```
+Row 1        : Completely empty
+Rows 2-9     : Antibody metadata — OFFSET to columns 9-506 only
+               (columns 1-8 are empty in these rows)
+               Col 9  = metadata label (e.g. "Antibody Name")
+               Cols 10-506 = values for each of the 497 antibodies
+Row 10       : TRUE column headers (Order, Sample Name, ..., 497 protein names)
+Rows 11-25   : 15 sample data rows (your actual expression values)
+Row 26+      : May contain stray values (e.g. "RI" annotation in L4 linear)
+               — these must be ignored
+```
+
+**RPPAnalyzeR handles this automatically.** It uses `skip` and `n_max`
+arguments in `readxl` to read exactly the rows it needs and ignores everything
+else.
+
+### The antibody naming problem
+
+The RPPA Core uses THREE different naming systems across sheets:
+
+| Sheet | Name format | Example |
+|---|---|---|
+| Antibody QC Scores | Human-readable | `Cyclin B1` |
+| L4 expression sheets | Heatmap label with suffix | `Cyclin-B1-R-V` |
+| Metadata rows | Short antibody name | `Cyclin-B1` |
+
+These **never match directly** — `"Cyclin B1" != "Cyclin-B1-R-V"`.
+The only shared key across all sheets is the **Antigen ID**
+(e.g. `AGID00024`), which is consistent everywhere.
+RPPAnalyzeR joins all sheets via Antigen ID to ensure correct QC filtering.
+
+### The antibody suffix key
+
+Protein column names in L4 sheets follow the pattern:
+`AntibodyName-Species-ValidationStatus`
+
+| Code | Meaning |
+|---|---|
+| **R** | Rabbit antibody |
+| **M** | Mouse antibody |
+| **G** | Goat antibody |
+| **V** | Validated — performs well in all RPPA assays |
+| **C** | Use with Caution — mostly reliable, some edge cases |
+| **Q** | Tissue-reactive — detects non-specific components |
+
+Example: `Akt_pS473-R-V` = phospho-Akt Ser473, rabbit antibody, validated.
+
+### The normalisation levels explained
+
+```
+L2 (log2)   Raw RPPASPACE curve-fitting output. No normalisation.
+    |
+    v
+L3 (log2)   + Loading normalisation
+              (bidirectional median centering: by antibody, then by sample)
+    |
+    v  
+L4 (log2)   + Set-to-Set batch correction         <-- USE THIS for analysis
+    |
+    v
+L4 (CHM)    + Antibody median centering            <-- USE THIS for heatmaps
+```
+
+Always use L4 for analysis. L2 and L3 are included for transparency only.
 
 ---
 
 ## Installation
 
-```r
-# Install from GitHub (one-time setup)
-if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
-remotes::install_github("AmarKumar/RPPAnalyzeR")
-```
+### Prerequisites
 
-Install dependencies first if needed:
+- R version ≥ 4.0.0
+- RStudio (recommended)
+
+**Find your R version:** In RStudio Console type `R.version$version.string`
+
+### Install dependencies
 
 ```r
 install.packages(c(
   "readxl", "dplyr", "tidyr", "ggplot2", "pheatmap",
   "stringr", "tibble", "purrr", "openxlsx",
-  "ggrepel", "RColorBrewer", "scales", "writexl"
+  "ggrepel", "RColorBrewer", "scales", "writexl",
+  "remotes", "rmarkdown"
 ))
+```
+
+### Install RPPAnalyzeR from GitHub
+
+```r
+remotes::install_github("akumar901/RPPAnalyzeR")
+```
+
+### Install from local folder (without GitHub)
+
+```r
+install.packages(
+  "/path/to/RPPAnalyzeR",
+  repos = NULL,
+  type  = "source"
+)
 ```
 
 ---
 
-## Quickstart — one line
+## Usage
+
+### Option 1 — Full pipeline in one line
 
 ```r
 library(RPPAnalyzeR)
 
 results <- run_pipeline(
-  xlsx_path  = "01_Jonathan_Coloff__Vipin_Rawat.xlsx",
+  xlsx_path  = "your_rppa_file.xlsx",
   output_dir = "rppa_output"
 )
 ```
 
-This single call runs the entire pipeline and writes to `rppa_output/`:
-
-```
-rppa_output/
-├── RPPAnalyzeR_results.xlsx        ← all key sheets + DE results, colour-coded
-├── DE_significant_hits.csv         ← significant proteins across all time points
-└── plots/
-    ├── 01_sample_QC.png            ← bar chart of total protein per sample
-    ├── 02_antibody_QC.png          ← QC score distribution histogram
-    ├── 03_volcano_0h_vs_2h.png     ← volcano plot: 0h vs 2h
-    ├── 03_volcano_0h_vs_4h.png     ← volcano plot: 0h vs 4h
-    ├── 03_volcano_0h_vs_8h.png     ← volcano plot: 0h vs 8h
-    ├── 03_volcano_0h_vs_24h.png    ← volcano plot: 0h vs 24h
-    ├── 04_heatmap_top50.png        ← clustered heatmap, top 50 variable proteins
-    └── 05_timecourse_key_proteins.png  ← time-course for top DE proteins
-```
-
----
-
-## Step-by-step usage
-
-### Step 1 — Import all sheets
+### Option 2 — Step by step
 
 ```r
 library(RPPAnalyzeR)
 
-rppa <- import_rppa("01_Jonathan_Coloff__Vipin_Rawat.xlsx")
-names(rppa)
-```
+# 1. Import all 12 sheets
+rppa <- import_rppa("your_rppa_file.xlsx")
 
-Returns a named list:
-
-| Element | Contents |
-|---|---|
-| `rppa$l4_log2` | **Primary data** — fully normalised log2 (loading + batch corrected) |
-| `rppa$l4_chm` | L4 antibody-median-centred — input for heatmaps |
-| `rppa$l4_linear` | L4 converted to linear scale — for bar graphs |
-| `rppa$l3_log2` | L3 loading-normalised only |
-| `rppa$l2_log2` | L2 raw un-normalised |
-| `rppa$chm_timepoints` | Named list of pairwise CHM sheets (Log2FC + p-values) |
-| `rppa$antibody_qc` | QC score table for all 497 antibodies |
-| `rppa$sample_qc` | Total protein and flags for all samples |
-| `rppa$metadata` | Antibody gene names, species (R/M/G), validation (V/C/Q) |
-| `rppa$sample_info` | Sample descriptions, timepoints, replicate IDs |
-
-### Step 2 — Quality control
-
-```r
-rppa <- run_qc(
-  rppa,
-  min_qc_score       = 0.8,    # MD Anderson minimum — scores below this are removed
-  remove_caution     = FALSE,  # keep C antibodies (flagged but not removed)
-  remove_low_protein = TRUE    # remove samples with Total Protein log2 < -3
-)
-
+# 2. Quality control
+rppa <- run_qc(rppa, min_qc_score = 0.8)
 print_qc_summary(rppa)
-```
 
-### Step 3 — Differential expression
-
-```r
-# Single time point
-de_24h <- diff_expression(rppa, timepoint = "24h")
-
-# All time points at once
+# 3. Differential expression — all time points vs 0h baseline
 de_all <- diff_expression_all(rppa)
 
-# Top hits at 24h
+# Top 10 hits at 24h
 top_proteins(de_all, n = 10, timepoint = "24h")
 
-# Only upregulated hits
-top_proteins(de_all, n = 10, timepoint = "24h", direction = "Up")
-```
-
-### Step 4 — Plots
-
-```r
-# Sample QC bar chart
-plot_sample_qc(rppa)
-
-# Antibody QC score distribution
-plot_antibody_qc(rppa)
-
-# Volcano plot — 0h vs 24h, label top 15 proteins
-plot_volcano(de_all, timepoint = "24h", label_top = 15)
-
-# Clustered heatmap — top 50 most variable proteins
-plot_heatmap(rppa)
-
-# Custom protein set heatmap
-plot_heatmap(rppa, proteins = c("Akt_pS473", "p70-S6K_pT389", "MAPK_pT202_Y204",
-                                 "4E-BP1", "mTOR_pS2448", "S6_pS240_S244"))
-
-# Time-course plot — mean ± SE across replicates
-plot_timecourse(rppa, proteins = c(
-  "p70-S6K_pT389",
-  "Akt_pS473",
-  "MAPK_pT202_Y204",
-  "4E-BP1",
-  "eEF2K"
+# 4. Plots
+plot_sample_qc(rppa)                    # sample total protein bar chart
+plot_antibody_qc(rppa)                  # QC score histogram
+plot_volcano(de_all, timepoint = "24h") # volcano plot
+plot_heatmap(rppa)                      # clustered heatmap top 50 proteins
+plot_timecourse(rppa, proteins = c(     # time-course line plot
+  "Akt_pS473-R-V",
+  "p70-S6K_pT389-R-V",
+  "MAPK_pT202_Y204-R-C"
 ))
+
+# 5. Export
+export_rppa_excel(rppa, de_results = de_all,
+                  output_path = "results.xlsx")
+export_de_csv(de_all, significant_only = TRUE)
 ```
 
-### Step 5 — Export
+### Option 3 — RMarkdown report
 
+Open `RPPAnalyzeR_Analysis.Rmd`, update the two path lines at the top,
+and click **Knit**. This generates a single self-contained HTML report
+with all plots, tables, and results embedded.
+
+---
+
+## Known Issues and Solutions
+
+These are real issues encountered during development — documented here
+so other users don't have to debug them.
+
+### Issue 1 — `Can't rename columns that don't exist`
+
+**Cause:** `readxl` with `col_names = FALSE` assigns internal names
+(`...1`, `...2`) to columns. Renaming by column name string then fails
+because the original names no longer exist.
+
+**Fix:** Assign column names by position using a hardcoded vector of
+9 fixed metadata names, not by matching strings.
+
+### Issue 2 — `Can't transform a data frame with duplicate names`
+
+**Cause:** A stray value `"RI"` (Reference Interval annotation) sits
+in row 30, column 316 of the `L4 (linear)` sheet — 5 rows below the
+actual data. When all rows were read, this triggered column count
+mismatches leading to recycled (duplicate) column names.
+
+**Fix:** Use `n_max = 15` when reading expression sheets to read
+exactly the 15 sample rows and nothing beyond.
+
+### Issue 3 — `Column 1 must be named / Empty name found at location 1`
+
+**Cause:** The metadata rows (rows 2–9) have columns 1–8 completely
+empty. `readxl` detects the used range as starting at column 9,
+returning a tibble where the label column becomes column 1 instead
+of column 9. Transposing this matrix then produced empty column names.
+
+**Fix:** Read each of the 8 metadata rows individually using
+`skip = i, n_max = 1` and build the data frame directly with
+hardcoded clean column names — no transpose needed.
+
+### Issue 4 — `run_qc()` silently removes almost all proteins
+
+**Cause:** The Antibody QC sheet uses human-readable names
+(`"Cyclin B1"`) while the expression sheets use heatmap-label names
+(`"Cyclin-B1-R-V"`). These share zero exact matches, so name-based
+joining drops every protein.
+
+**Fix:** Join QC scores to expression sheet proteins via **Antigen ID**
+(e.g. `AGID00024`) — the only field that is identical across all sheets.
+All 497 Antigen IDs match perfectly.
+
+### Issue 5 — `None of the requested proteins found in expression matrix`
+
+**Cause:** `plot_timecourse()` was building a lookup map using
+suffix-stripped names as keys (e.g. `"Akt_pS473"`) but then looking
+up full names (e.g. `"Akt_pS473-R-V"`) — a key mismatch.
+
+**Fix:** `plot_timecourse()` now tries exact match first, then
+falls back to suffix-stripped match, accepting protein names in
+either format.
+
+### Issue 6 — Old package version persists after reinstall
+
+**Cause:** R keeps loaded packages in memory for the session even
+after reinstalling. Knitting an RMD uses the in-memory version.
+
+**Fix:** After reinstalling, always go to
+**Session → Restart R** in RStudio before knitting.
+
+---
+
+## Troubleshooting Tips
+
+**Find your Mac username:**
 ```r
-# Full Excel workbook — all key sheets, highlighted DE hits
-export_rppa_excel(
-  rppa,
-  de_results  = de_all,
-  output_path = "RPPAnalyzeR_results.xlsx"
-)
+Sys.getenv("USER")
+```
 
-# Significant hits only as CSV
-export_de_csv(de_all, significant_only = TRUE,
-              output_path = "significant_proteins.csv")
+**Confirm the fix is in your installed version:**
+```r
+grep("stripped_map", deparse(body(plot_timecourse)))
+# Should return line numbers — if character(0), old version is still loaded
+```
 
-# Save any plot
-p <- plot_volcano(de_all, timepoint = "24h")
-save_plot(p, "volcano_24h.png", width = 8, height = 7)
+**Find where R installed the package:**
+```r
+find.package("RPPAnalyzeR")
+```
+
+**Check what proteins are available after QC:**
+```r
+expr <- get_expression_matrix(rppa, "l4_log2")
+head(colnames(expr$matrix), 20)
+```
+
+**Check protein names before plotting:**
+```r
+# Search for a protein
+colnames(expr$matrix)[grep("Cyclin", colnames(expr$matrix))]
 ```
 
 ---
 
-## Understanding the MD Anderson normalisation levels
+## Output Files
 
-The package imports all four levels — always use **L4** for analysis:
+Running the full pipeline produces:
 
 ```
-L2 (log2)   Raw RPPASPACE output. No normalisation.
-    ↓
-L3 (log2)   + Loading normalisation (bidirectional median centering by antibody then by sample)
-    ↓
-L4 (log2)   + Set-to-Set batch correction                    ← USE THIS for analysis
-    ↓
-L4 (CHM)    + Antibody median centering                      ← USE THIS for heatmaps
+output_dir/
+├── RPPAnalyzeR_results.xlsx        All key sheets + DE results (colour-coded)
+├── DE_significant_hits.csv         Significant proteins across all time points
+└── plots/
+    ├── 01_sample_QC.png            Bar chart of total protein per sample
+    ├── 02_antibody_QC.png          Antibody QC score histogram
+    ├── 03_volcano_0h_vs_2h.png     Volcano plot: 0h vs 2h
+    ├── 03_volcano_0h_vs_4h.png     Volcano plot: 0h vs 4h
+    ├── 03_volcano_0h_vs_8h.png     Volcano plot: 0h vs 8h
+    ├── 03_volcano_0h_vs_24h.png    Volcano plot: 0h vs 24h
+    ├── 04_heatmap_top50.png        Clustered heatmap top 50 proteins
+    ├── 05_timecourse_mTOR_PI3K.png mTOR and PI3K pathway time-course
+    ├── 05_timecourse_MAPK_ERK.png  MAPK and ERK pathway time-course
+    └── 05_timecourse_CellCycle.png Cell cycle and apoptosis time-course
 ```
 
-L2 and L3 are included for transparency and troubleshooting only.
+---
+
+## License
+
+MIT © Amar Kumar — see [LICENSE](LICENSE) for details.
+
+You are free to use, modify, share, and build on this package.
+If you use it in a publication, a citation is appreciated.
 
 ---
 
-## Antibody label key
+## Citation
 
-In heatmaps, antibody names follow: `AntibodyName-Species-ValidationStatus`
+```
+Kumar A (2025). RPPAnalyzeR: A complete R analysis pipeline for
+MD Anderson RPPA Core output. R package version 0.1.0.
+https://github.com/akumar901/RPPAnalyzeR
+```
 
-| Code | Meaning |
-|---|---|
-| R | Rabbit antibody |
-| M | Mouse antibody |
-| G | Goat antibody |
-| V | Validated — performs well in all RPPA assays |
-| C | Use with Caution — mostly reliable, some edge cases |
-| Q | "Tissue reactive" — detects non-specific components in tissue samples |
+Please also acknowledge the MD Anderson RPPA Core:
 
-Example: `Akt_pS473-R-V` = Akt phospho-Ser473, rabbit, validated.
-
----
-
-## Why the L4 sheet looks disorganized
-
-The MD Anderson Excel file has a specific structure:
-
-- Rows 1 is blank
-- Rows 2–9 contain antibody metadata (gene names, slide IDs, etc.) shifted to column 9 onwards
-- Row 10 is the actual column header
-- Rows 11 onwards are the 15 sample data rows
-
-`RPPAnalyzeR` knows this format and parses it automatically. You never need to manually rearrange anything.
-
----
-
-## Citing this package
-
-If you use RPPAnalyzeR in your work, please also cite the MD Anderson RPPA Core:
-
-> *The Functional Proteomics RPPA Core is supported by MD Anderson Cancer Center Support Grant # 5 P30 CA016672-40.*
+> *The Functional Proteomics RPPA Core is supported by MD Anderson
+> Cancer Center Support Grant # 5 P30 CA016672-40.*
 
 ---
 
 ## Contact
 
-Amar Kumar — [your.email@example.com]
-
-Issues and pull requests welcome: [https://github.com/AmarKumar/RPPAnalyzeR/issues](https://github.com/AmarKumar/RPPAnalyzeR/issues)
+**Amar Kumar**  
+Email: amarcompbio@gmail.com  
+Issues and pull requests welcome:
+[https://github.com/akumar901/RPPAnalyzeR/issues](https://github.com/akumar901/RPPAnalyzeR/issues)

@@ -61,7 +61,7 @@ The fastest path to results — runs everything and writes outputs to a folder:
 library(RPPAnalyzeR)
 
 results <- run_pipeline(
-  xlsx_path  = "01_Jonathan_Coloff__Vipin_Rawat.xlsx",
+  xlsx_path  = "your_rppa_file.xlsx",
   output_dir = "rppa_analysis"
 )
 ```
@@ -80,7 +80,7 @@ This produces:
 ```r
 library(RPPAnalyzeR)
 
-rppa <- import_rppa("01_Jonathan_Coloff__Vipin_Rawat.xlsx")
+rppa <- import_rppa("your_rppa_file.xlsx")
 
 # What did we get?
 names(rppa)
