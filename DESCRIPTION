@@ -1,0 +1,39 @@
+Package: RPPAnalyzeR
+Title: RPPA Data Analysis Pipeline for MD Anderson RPPA Core Output
+Version: 0.1.0
+Authors@R: 
+    person("Amar", "Kumar", email = "your.email@example.com", role = c("aut", "cre"))
+Description: A complete analysis pipeline for Reverse Phase Protein Array (RPPA) data
+    produced by the MD Anderson Cancer Center Functional Proteomics RPPA Core.
+    Handles import of all Excel sheets (L2/L3/L4 log2, linear, CHM), quality control
+    filtering, differential expression analysis across time points, pathway enrichment,
+    and publication-ready visualizations including heatmaps, volcano plots, and
+    time-course plots.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+Imports:
+    readxl (>= 1.4.0),
+    dplyr (>= 1.1.0),
+    tidyr (>= 1.3.0),
+    ggplot2 (>= 3.4.0),
+    pheatmap (>= 1.0.12),
+    stringr (>= 1.5.0),
+    tibble (>= 3.2.0),
+    purrr (>= 1.0.0),
+    openxlsx (>= 4.2.5),
+    ggrepel (>= 0.9.0),
+    RColorBrewer (>= 1.1.3),
+    scales (>= 1.2.0),
+    writexl (>= 1.4.2),
+    tidyselect (>= 1.2.0)
+Suggests:
+    limma,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+URL: https://github.com/yourusername/RPPAnalyzeR
+BugReports: https://github.com/yourusername/RPPAnalyzeR/issues

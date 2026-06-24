@@ -1,0 +1,384 @@
+---
+title: "RPPA Analysis Report"
+subtitle: "MCF7 Serum Starvation Time-Course | Set208 | MD Anderson RPPA Core"
+author: "Amar Kumar"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+    fig_width: 10
+    fig_height: 6
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  dpi       = 150
+)
+
+# ── USER: update this path to your Excel file ──────────────────────────────
+xlsx_path <- "/Users/AMARMAC/Downloads/RPPAnalyzeR/01_Jonathan_Coloff__Vipin_Rawat.xlsx"
+
+# ── USER: update this to where you want outputs saved ──────────────────────
+output_dir <- "/Users/AMARMAC/Downloads/RPPAnalyzeR/my_results"
+
+dir.create(file.path(output_dir, "plots"), recursive = TRUE, showWarnings = FALSE)
+```
+
+---
+
+# Overview
+
+This report documents the complete analysis of a **Reverse Phase Protein Array (RPPA)** dataset produced by the [MD Anderson Functional Proteomics RPPA Core](https://www.mdanderson.org/research/research-resources/core-facilities/functional-proteomics-rppa-core.html).
+
+| Parameter | Value |
+|---|---|
+| Cell line | MCF7 human breast cancer cells |
+| Experiment | Serum starvation time-course |
+| Time points | 0h, 2h, 4h, 8h, 24h (3 replicates each) |
+| Total samples | 15 |
+| Antibodies probed | 497 |
+| RPPA Set | Set208, May 2025 |
+| Data level used | L4 (log2) — loading + batch normalised |
+
+---
+
+# 1. Setup
+
+```{r load_package}
+library(RPPAnalyzeR)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+```
+
+---
+
+# 2. Import Data
+
+All 12 sheets from the MD Anderson Excel workbook are imported in one call. The disorganised 9-row metadata header is parsed automatically.
+
+```{r import}
+rppa <- import_rppa(xlsx_path, verbose = TRUE)
+```
+
+## 2.1 What was imported
+
+```{r import_summary}
+summary_tbl <- data.frame(
+  Sheet = c("L4 (log2)", "L4 (linear)", "L4 (CHM)",
+            "L3 (log2)", "L2 (log2)",
+            "CHM time-point sheets", "Antibody QC", "Sample QC", "Metadata"),
+  Contents = c(
+    "Primary data — fully normalised (loading + batch)",
+    "L4 converted to linear scale — for bar graphs",
+    "L4 antibody-median-centred — for heatmaps",
+    "Loading-normalised only (intermediate)",
+    "Raw unnormalised RPPASPACE output",
+    paste0(length(rppa$chm_timepoints), " pairwise comparisons vs 0h with Log2FC and p-values"),
+    paste0(nrow(rppa$antibody_qc), " antibodies with QC scores"),
+    paste0(nrow(rppa$sample_qc), " samples with total protein values"),
+    paste0(nrow(rppa$metadata), " antibodies with gene names, species, validation status")
+  )
+)
+kable(summary_tbl, caption = "Sheets imported from RPPA Core Excel file")
+```
+
+## 2.2 Sample overview
+
+```{r sample_table}
+rppa$sample_info %>%
+  select(Sample_Name, Sample_Description, Sample_Type, Timepoint, Replicate) %>%
+  kable(caption = "All 15 samples in this dataset")
+```
+
+## 2.3 Antibody metadata (first 20)
+
+```{r metadata_preview}
+rppa$metadata %>%
+  head(20) %>%
+  select(Antibody_Name, Gene_Name, Antibody_Origin, Validation_Status) %>%
+  kable(caption = "Antibody metadata — first 20 of 497")
+```
+
+---
+
+# 3. Quality Control
+
+## 3.1 Sample QC — Total Protein Content
+
+Total protein content reflects the average signal of a sample across all antibodies. Values below log2 = −3 are flagged as unreliable by MD Anderson and should be excluded.
+
+```{r sample_qc_plot, fig.height=5, fig.cap="Total protein content per sample. Red dashed line = exclusion threshold (log2 < -3)."}
+plot_sample_qc(rppa)
+```
+
+```{r sample_qc_table}
+rppa$sample_qc %>%
+  select(Sample_Description, Timepoint, Total_Protein, Low_Protein) %>%
+  mutate(
+    Total_Protein = round(Total_Protein, 3),
+    Status        = ifelse(Low_Protein, "FAIL — exclude", "PASS")
+  ) %>%
+  select(-Low_Protein) %>%
+  kable(caption = "Sample QC metrics")
+```
+
+## 3.2 Antibody QC — Slide Staining Scores
+
+QC scores range from 0 (worst) to 1 (best). MD Anderson requires a minimum score of 0.8 for inclusion.
+
+```{r antibody_qc_plot, fig.height=5, fig.cap="Distribution of antibody QC scores. Red dashed line = minimum threshold (0.8)."}
+plot_antibody_qc(rppa)
+```
+
+## 3.3 Apply QC filters
+
+```{r run_qc}
+rppa <- run_qc(
+  rppa,
+  min_qc_score       = 0.8,
+  remove_caution     = FALSE,
+  remove_low_protein = TRUE
+)
+
+print_qc_summary(rppa)
+```
+
+```{r qc_report_table}
+qr <- rppa$qc_report
+data.frame(
+  Parameter = c(
+    "Antibodies input", "Antibodies kept", "Antibodies removed (low QC)",
+    "Caution (C) antibodies retained",
+    "Samples input", "Samples kept", "Low-protein samples removed"
+  ),
+  Value = c(
+    qr$n_antibodies_input, qr$n_antibodies_kept, qr$n_antibodies_removed,
+    length(qr$caution_antibodies),
+    qr$n_samples_input, qr$n_samples_kept,
+    length(qr$low_protein_samples)
+  )
+) %>% kable(caption = "QC filter summary")
+```
+
+---
+
+# 4. Differential Expression Analysis
+
+For each time point, proteins are compared against the 0h baseline using the pre-computed t-test p-values from the MD Anderson CHM sheets. Significance threshold: **|Log2FC| > 0.5 and P < 0.05**.
+
+```{r run_de}
+de_all <- diff_expression_all(
+  rppa,
+  ctrl_timepoint = "0h",
+  p_threshold    = 0.05,
+  fc_threshold   = 0.5
+)
+```
+
+## 4.1 Summary of significant hits per time point
+
+```{r de_summary_table}
+de_all %>%
+  group_by(Timepoint) %>%
+  summarise(
+    Total_tested  = n(),
+    Significant   = sum(Significant, na.rm = TRUE),
+    Upregulated   = sum(Direction == "Up",   na.rm = TRUE),
+    Downregulated = sum(Direction == "Down", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  kable(caption = "Significant proteins at each time point vs 0h baseline")
+```
+
+## 4.2 Top 15 proteins at each time point {.tabset}
+
+### 2h vs 0h
+```{r top_2h}
+top_proteins(de_all, n = 15, timepoint = "2h") %>%
+  select(Protein, Mean_Ctrl, Mean_Treat, Log2FC, Pvalue, Direction) %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  kable(caption = "Top 15 significant proteins at 2h")
+```
+
+### 4h vs 0h
+```{r top_4h}
+top_proteins(de_all, n = 15, timepoint = "4h") %>%
+  select(Protein, Mean_Ctrl, Mean_Treat, Log2FC, Pvalue, Direction) %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  kable(caption = "Top 15 significant proteins at 4h")
+```
+
+### 8h vs 0h
+```{r top_8h}
+top_proteins(de_all, n = 15, timepoint = "8h") %>%
+  select(Protein, Mean_Ctrl, Mean_Treat, Log2FC, Pvalue, Direction) %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  kable(caption = "Top 15 significant proteins at 8h")
+```
+
+### 24h vs 0h
+```{r top_24h}
+top_proteins(de_all, n = 15, timepoint = "24h") %>%
+  select(Protein, Mean_Ctrl, Mean_Treat, Log2FC, Pvalue, Direction) %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  kable(caption = "Top 15 significant proteins at 24h")
+```
+
+---
+
+# 5. Volcano Plots {.tabset}
+
+Each point is one protein. Red = significantly upregulated, green = significantly downregulated, grey = not significant. Labels show the top 15 most significant proteins.
+
+### 2h vs 0h
+```{r volcano_2h, fig.height=7, fig.cap="Volcano plot: 2h vs 0h baseline"}
+p_v2 <- plot_volcano(de_all, timepoint = "2h", label_top = 15)
+print(p_v2)
+save_plot(p_v2, file.path(output_dir, "plots", "volcano_0h_vs_2h.png"), width = 8, height = 7)
+```
+
+### 4h vs 0h
+```{r volcano_4h, fig.height=7, fig.cap="Volcano plot: 4h vs 0h baseline"}
+p_v4 <- plot_volcano(de_all, timepoint = "4h", label_top = 15)
+print(p_v4)
+save_plot(p_v4, file.path(output_dir, "plots", "volcano_0h_vs_4h.png"), width = 8, height = 7)
+```
+
+### 8h vs 0h
+```{r volcano_8h, fig.height=7, fig.cap="Volcano plot: 8h vs 0h baseline"}
+p_v8 <- plot_volcano(de_all, timepoint = "8h", label_top = 15)
+print(p_v8)
+save_plot(p_v8, file.path(output_dir, "plots", "volcano_0h_vs_8h.png"), width = 8, height = 7)
+```
+
+### 24h vs 0h
+```{r volcano_24h, fig.height=7, fig.cap="Volcano plot: 24h vs 0h baseline"}
+p_v24 <- plot_volcano(de_all, timepoint = "24h", label_top = 15)
+print(p_v24)
+save_plot(p_v24, file.path(output_dir, "plots", "volcano_0h_vs_24h.png"), width = 8, height = 7)
+```
+
+---
+
+# 6. Clustered Heatmap
+
+Top 50 most variable proteins across all samples, using L4 CHM (antibody-median-centred) values. Red = high expression, green = low expression. Samples are kept in time-point order; proteins are clustered by similarity.
+
+```{r heatmap, fig.height=14, fig.cap="Clustered heatmap of top 50 most variable proteins"}
+# Get top 50 most variable protein names
+expr  <- get_expression_matrix(rppa, "l4_chm")
+vars  <- apply(expr$matrix, 2, var, na.rm = TRUE)
+top50 <- names(sort(vars, decreasing = TRUE))[1:50]
+top50_clean <- stringr::str_remove(top50, "-[RMG]-[VCE]$")
+
+plot_heatmap(
+  rppa,
+  proteins = top50_clean,
+  title    = "Top 50 Most Variable Proteins — MCF7 Serum Starvation (L4 CHM)"
+)
+```
+
+---
+
+# 7. Time-Course Plots {.tabset}
+
+Mean ± SE expression across replicates at each time point (L4 log2 values).
+
+### mTOR / PI3K pathway
+```{r timecourse_mtor, fig.cap="mTOR and PI3K pathway proteins over time"}
+p_tc1 <- plot_timecourse(rppa, proteins = c(
+  "p70-S6K_pT389-R-V",
+  "Akt_pS473-R-V",
+  "4E-BP1-R-V",
+  "mTOR_pS2448-R-C",
+  "S6_pS240_S244-R-V",
+  "PRAS40_pT246-R-V"
+))
+print(p_tc1)
+save_plot(p_tc1, file.path(output_dir, "plots", "timecourse_mTOR_PI3K.png"), width = 9, height = 6)
+```
+
+### MAPK / ERK pathway
+```{r timecourse_mapk, fig.cap="MAPK and ERK pathway proteins over time"}
+p_tc2 <- plot_timecourse(rppa, proteins = c(
+  "MAPK_pT202_Y204-R-C",
+  "MEK1_pS217_S221-R-V",
+  "eEF2K-R-V",
+  "RSK1-R-V",
+  "Mnk1-R-V",
+  "C-Raf_pS338-R-V"
+))
+print(p_tc2)
+save_plot(p_tc2, file.path(output_dir, "plots", "timecourse_MAPK_ERK.png"), width = 9, height = 6)
+```
+
+### Cell cycle / apoptosis
+```{r timecourse_cc, fig.cap="Cell cycle and apoptosis proteins over time"}
+p_tc3 <- plot_timecourse(rppa, proteins = c(
+  "Cyclin-B1-R-V",
+  "Cyclin-D1-R-C",
+  "p27-Kip1-R-C",
+  "Rb_pS807_S811-R-V",
+  "Caspase-3-cleaved-R-C",
+  "PARP-R-V"
+))
+print(p_tc3)
+save_plot(p_tc3, file.path(output_dir, "plots", "timecourse_CellCycle.png"), width = 9, height = 6)
+```
+
+---
+
+# 8. Export Results
+
+```{r export_excel}
+export_rppa_excel(
+  rppa,
+  de_results  = de_all,
+  output_path = file.path(output_dir, "RPPAnalyzeR_results.xlsx")
+)
+```
+
+```{r export_csv}
+export_de_csv(
+  de_all,
+  output_path      = file.path(output_dir, "significant_hits.csv"),
+  significant_only = TRUE
+)
+
+n_sig <- sum(de_all$Significant, na.rm = TRUE)
+cat("Total significant hits exported:", n_sig, "\n")
+cat("Output folder:", output_dir, "\n")
+```
+
+---
+
+# 9. Session Info
+
+For reproducibility — records the exact R version and package versions used.
+
+```{r session_info}
+sessionInfo()
+```
+
+---
+
+# Acknowledgements
+
+RPPA data was generated by the **MD Anderson Functional Proteomics RPPA Core**.
+
+> *The Functional Proteomics RPPA Core is supported by MD Anderson Cancer Center Support Grant # 5 P30 CA016672-40.*
+
+---
+
+*Report generated by RPPAnalyzeR v0.1.0 — Amar Kumar*

@@ -1,0 +1,28 @@
+# Data files — never push raw data
+*.xlsx
+*.xls
+*.csv
+
+# Results and outputs
+my_results/
+*.html
+*.pdf
+*.png
+*.jpg
+
+# R specific
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Mac junk
+.DS_Store
+__MACOSX/
+
+# Zip files
+*.zip
+
+# Log files
+*.log

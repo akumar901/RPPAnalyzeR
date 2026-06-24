@@ -1,0 +1,255 @@
+---
+title: "Getting Started with RPPAnalyzeR"
+subtitle: "RPPA Time-Course Analysis: MCF7 Serum Starvation Example"
+author: "Amar Kumar"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Getting Started with RPPAnalyzeR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse   = TRUE,
+  comment    = "#>",
+  fig.width  = 9,
+  fig.height = 6,
+  dpi        = 150,
+  warning    = FALSE,
+  message    = FALSE
+)
+```
+
+## Overview
+
+`RPPAnalyzeR` provides a complete analysis pipeline for **Reverse Phase Protein Array (RPPA)** data produced by the [MD Anderson Cancer Center Functional Proteomics RPPA Core](https://www.mdanderson.org/research/research-resources/core-facilities/functional-proteomics-rppa-core.html).
+
+This vignette walks through the full analysis of a serum-starvation time-course experiment in **MCF7 human breast cancer cells**, probed with **497 antibodies** across **5 time points** (0h, 2h, 4h, 8h, 24h).
+
+---
+
+## Installation
+
+```r
+# Install from GitHub
+if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+remotes::install_github("yourusername/RPPAnalyzeR")
+```
+
+Install required dependencies:
+
+```r
+install.packages(c(
+  "readxl", "dplyr", "tidyr", "ggplot2", "pheatmap",
+  "stringr", "tibble", "purrr", "openxlsx",
+  "ggrepel", "RColorBrewer", "scales"
+))
+```
+
+---
+
+## Quickstart: One-Line Pipeline
+
+The fastest path to results — runs everything and writes outputs to a folder:
+
+```r
+library(RPPAnalyzeR)
+
+results <- run_pipeline(
+  xlsx_path  = "01_Jonathan_Coloff__Vipin_Rawat.xlsx",
+  output_dir = "rppa_analysis"
+)
+```
+
+This produces:
+- `rppa_analysis/RPPAnalyzeR_results.xlsx` — all key sheets in one workbook
+- `rppa_analysis/DE_significant_hits.csv` — significant proteins across all time points
+- `rppa_analysis/plots/` — 5+ publication-ready figures
+
+---
+
+## Step-by-Step Walkthrough
+
+### 1. Import the RPPA Workbook
+
+```r
+library(RPPAnalyzeR)
+
+rppa <- import_rppa("01_Jonathan_Coloff__Vipin_Rawat.xlsx")
+
+# What did we get?
+names(rppa)
+#> [1] "l4_log2"        "l4_linear"      "l4_chm"
+#>     "l3_log2"        "l2_log2"        "chm_timepoints"
+#>     "antibody_qc"    "sample_qc"      "metadata"
+#>     "sample_info"
+
+# Check sample info
+rppa$sample_info
+```
+
+The import reads all 12 sheets and organises them into a named list. The most important sheet is `l4_log2` — fully normalised (loading + batch) log2 expression values.
+
+### 2. Quality Control
+
+```r
+rppa <- run_qc(
+  rppa,
+  min_qc_score       = 0.8,    # MD Anderson minimum threshold
+  remove_caution     = FALSE,  # keep "C" antibodies (but they're flagged)
+  remove_low_protein = TRUE    # exclude samples with Total Protein < -3
+)
+
+print_qc_summary(rppa)
+```
+
+**What the MD Anderson QC scores mean:**
+- `0.8–1.0` → reliable data; 0.8 is the minimum acceptable
+- Scores consider: signal strength, background noise, dilution curve quality
+- All 497 antibodies in this dataset passed (scores 0.81–0.96+)
+- All 15 samples passed total protein QC (none below -3 threshold)
+
+Visualise the QC:
+
+```r
+plot_sample_qc(rppa)    # bar chart of total protein per sample
+plot_antibody_qc(rppa)  # histogram of QC scores
+```
+
+### 3. Which Sheets Are Most Useful?
+
+| Sheet | Use case |
+|---|---|
+| `rppa$l4_log2` | **Primary analysis** — normalised log2 values |
+| `rppa$l4_chm` | **Heatmaps** — median-centred, matches the PDF heatmaps |
+| `rppa$chm_timepoints` | **Pairwise comparisons** — each time point vs. 0h with Log2FC + P values |
+| `rppa$antibody_qc` | Filter low-quality antibodies |
+| `rppa$sample_qc` | Flag problematic samples |
+| `rppa$metadata` | Antibody gene names, origin (R/M/G), validation status (V/C) |
+
+```r
+# Access the 0h vs 24h comparison directly
+rppa$chm_timepoints$o_vs_24h %>%
+  dplyr::filter(Significant) %>%
+  dplyr::arrange(Pvalue) %>%
+  head(10)
+```
+
+### 4. Differential Expression
+
+```r
+# One time point at a time
+de_2h <- diff_expression(rppa, timepoint = "2h")
+
+# All time points in one call
+de_all <- diff_expression_all(rppa)
+
+# Top 10 most significant proteins at 24h
+top_proteins(de_all, n = 10, timepoint = "24h")
+```
+
+The CHM sheets in the Excel file already contain **t-test p-values** computed by Excel's TTEST function. `diff_expression()` reads these directly (via `use_chm_sheet = TRUE`) for consistency with the MD Anderson report. Setting `use_chm_sheet = FALSE` runs a fresh t-test from the L4 log2 values.
+
+### 5. Visualizations
+
+#### Volcano plot
+```r
+plot_volcano(de_all, timepoint = "24h", label_top = 15)
+```
+
+#### Clustered heatmap (top 50 most variable proteins)
+```r
+plot_heatmap(rppa, title = "Top 50 Proteins — MCF7 Serum Starvation")
+```
+
+#### Time-course for specific proteins
+```r
+# mTOR pathway proteins known to change with serum starvation
+plot_timecourse(rppa, proteins = c(
+  "p70-S6K_pT389",   # key mTOR readout
+  "4E-BP1",          # mTOR cap-dependent translation
+  "Akt_pS473",       # PI3K/Akt
+  "MAPK_pT202_Y204", # ERK
+  "S6_pS240_S244"    # ribosomal S6
+))
+```
+
+### 6. Export Results
+
+```r
+# Full Excel workbook with all important sheets
+export_rppa_excel(
+  rppa,
+  de_results  = de_all,
+  output_path = "my_rppa_analysis.xlsx"
+)
+
+# Just the significant hits as CSV
+export_de_csv(de_all, significant_only = TRUE,
+              output_path = "significant_proteins.csv")
+```
+
+The exported Excel file contains:
+- **L4_log2** — primary normalised data
+- **L4_CHM** — heatmap-ready data
+- **CHM_0h_vs_2h / 4h / 8h / 24h** — pairwise comparisons (highlighted: green = down, red = up)
+- **DE_All_Timepoints** — combined differential expression
+- **Antibody_QC** and **Sample_QC** — quality tables
+- **Antibody_Metadata** — gene names, species, validation status
+
+---
+
+## Understanding the Data Levels
+
+The MD Anderson pipeline produces 4 normalisation levels. RPPAnalyzeR imports all of them:
+
+```
+L2 (log2)  → Raw RPPA signal from RPPASPACE. No normalisation.
+    ↓
+L3 (log2)  → L2 + bidirectional median centering (loading normalisation).
+    ↓
+L4 (log2)  → L3 + batch effect correction (Set-to-Set adjustment).
+    ↓
+L4 (CHM)   → L4 + median centering by antibody (for heatmaps).
+```
+
+**Always use L4 (log2) for analysis.** L2 and L3 are included for transparency and troubleshooting, not for biological conclusions.
+
+---
+
+## Antibody Labels Decoded
+
+In the heatmaps, antibody names follow the pattern: `AntibodyName-Species-Validation`
+
+| Code | Meaning |
+|---|---|
+| **R** | Rabbit antibody |
+| **M** | Mouse antibody |
+| **G** | Goat antibody |
+| **V** | Validated — performs well in all assays |
+| **C** | Caution — good under most conditions, some discrepancies |
+| **E** | Under evaluation |
+
+Example: `Akt_pS473-R-V` = Akt phospho-Ser473, rabbit antibody, validated.
+
+---
+
+## Citation
+
+If you use RPPAnalyzeR in your work, please cite:
+
+1. The MD Anderson RPPA Core: Grant # 5 P30 CA016672-40
+2. This package: [GitHub link]
+
+---
+
+## Session Info
+
+```{r session}
+sessionInfo()
+```
