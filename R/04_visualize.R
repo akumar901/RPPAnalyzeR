@@ -77,9 +77,16 @@ plot_heatmap <- function(rppa,
     fontsize_col          = 9,
     main                  = title,
     border_color          = NA,
-    show_rownames         = nrow(mat) <= 60,
-    filename              = if (!is.null(filename)) filename else NA
+    show_rownames         = nrow(mat) <= 60
   )
+
+  # Only add filename/dimensions when actually saving
+  if (!is.null(filename)) {
+    args$filename <- filename
+    args$width    <- 10
+    args$height   <- 14
+  }
+
   extra <- list(...)
   args[names(extra)] <- extra
 
