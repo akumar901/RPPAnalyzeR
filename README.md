@@ -11,6 +11,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 <!-- badges: end -->
 
+> **Note:** The CI badge may show a build failure as the GitHub Actions environment does not have all RPPA dependencies pre-installed. The package installs and runs correctly locally following the instructions below.
+
 ---
 
 ## What is RPPAnalyzeR?

@@ -134,7 +134,7 @@ library(RPPAnalyzeR)
 
 # Run your analysis
 results <- run_pipeline(
-  xlsx_path  = "01_Jonathan_Coloff__Vipin_Rawat.xlsx",
+  xlsx_path  = "your_rppa_file.xlsx",
   output_dir = "my_rppa_output"
 )
 ```
@@ -175,3 +175,44 @@ git push
 
 And always include the MD Anderson RPPA Core grant acknowledgement:
 > "The Functional Proteomics RPPA Core is supported by MD Anderson Cancer Center Support Grant # 5 P30 CA016672-40."
+
+
+---
+
+## Troubleshooting — Git Issues When Re-initialising
+
+If you download a fresh zip of RPPAnalyzeR and try to push updates, you may
+encounter git errors because the folder has no git history attached.
+Here is the correct way to reconnect to your GitHub repo:
+
+```bash
+# Step 1 — Remove any broken git repo
+rm -rf /path/to/RPPAnalyzeR/.git
+
+# Step 2 — Reinitialise git inside the folder
+cd /path/to/RPPAnalyzeR
+git init
+
+# Step 3 — Connect to your GitHub repo
+git remote add origin https://github.com/YOUR_USERNAME/RPPAnalyzeR.git
+
+# Step 4 — Fetch what is already on GitHub
+git fetch origin
+
+# Step 5 — Switch to main branch tracking GitHub (use -f to force if needed)
+git checkout -b main --track origin/main -f
+
+# Step 6 — Verify you are in sync
+git status
+# Should say: "nothing to commit, working tree clean"
+
+# Step 7 — Now add and push your changes normally
+git add <your changed files>
+git status   # always check before committing
+git commit -m "your message"
+git push
+```
+
+**Important:** Always run `git status` before `git commit` to verify
+only your intended files are staged. Never run `git add .` without
+checking status first — especially if your data files are in the folder.
