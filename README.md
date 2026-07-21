@@ -306,6 +306,55 @@ after reinstalling. Knitting an RMD uses the in-memory version.
 **Fix:** After reinstalling, always go to
 **Session → Restart R** in RStudio before knitting.
 
+### Issue 7 — Low-QC antibodies may appear in volcano plots and DE results
+
+**Cause:** The MD Anderson CHM pairwise comparison sheets contain
+pre-computed Log2FC and P values for **all 497 antibodies**, including
+any that failed QC filtering (e.g. B7-H4, QC score < 0.8). The
+`diff_expression()` function reads these pre-computed values directly
+from the CHM sheets, meaning a QC-failed antibody could theoretically
+appear as a significant hit in a volcano plot even though it was removed
+from the expression matrix by `run_qc()`.
+
+**Fix:** `diff_expression()` now cross-references the list of
+QC-passing proteins from `rppa$l4_log2` and filters DE results to
+exclude any antibody that did not pass QC. This ensures complete
+consistency between the QC-filtered expression data and all downstream
+DE analysis and visualisations. Download the fixed `03_differential.R`
+from the repository and reinstall the package.
+
+**Note:** In practice this only affects antibodies with a QC score
+below 0.8. In the tested dataset (Set208), only B7-H4 was removed,
+and its low QC score means it is very unlikely to produce a strong
+DE signal. However the fix ensures rigorous consistency for all
+future datasets.
+
+### Issue 8 — Antibodies with "Q" validation code incorrectly excluded from DE results
+
+**Cause:** The protein name matching regex used in `diff_expression()`
+to cross-reference QC-passing proteins was `-[RMG]-[VCE]$`, which
+handles Validated (V) and Caution (C) antibody suffixes but missed
+the **Q (tissue-reactive)** suffix. This caused antibodies like
+`Snail-M-Q` to be incorrectly excluded from DE results even though
+they passed the QC score threshold, because `"Snail"` (CHM sheet name)
+did not match `"Snail-M-Q"` (expression sheet name).
+
+**Impact:** In the tested dataset (Set208), `Snail` was incorrectly
+absent from the 2h and 8h DE results when the Issue 7 fix was first
+applied.
+
+**Fix:** The regex was updated to `-[RMG]-[VCEQq]$` to correctly
+handle all three validation codes:
+- **V** — Validated
+- **C** — Use with Caution
+- **Q** — Tissue-reactive
+
+**Important note for users:** If you modify the protein name matching
+regex in `diff_expression()`, ensure it covers all three validation
+codes (V, C, Q). Missing any one code will silently exclude the
+affected antibodies from DE results without any error message,
+potentially affecting your significant hits list.
+
 ---
 
 ## Troubleshooting Tips
