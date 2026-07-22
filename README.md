@@ -424,7 +424,7 @@ If you use it in a publication, a citation is appreciated.
 ## Citation
 
 ```
-Kumar A (2025). RPPAnalyzeR: A complete R analysis pipeline for
+Kumar A (2026). RPPAnalyzeR: A complete R analysis pipeline for
 MD Anderson RPPA Core output. R package version 0.1.0.
 https://github.com/akumar901/RPPAnalyzeR
 ```
