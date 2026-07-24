@@ -364,6 +364,57 @@ when changing it.
 
 ---
 
+### Issue 9 — Heatmap PNG not written by the RMarkdown template
+
+**Cause:** `plot_heatmap()` wraps `pheatmap`, which does not return a
+ggplot object and therefore cannot be saved with `save_plot()`. It takes
+its own `filename` argument instead. The heatmap chunk in
+`RPPAnalyzeR_Analysis.Rmd` called `plot_heatmap()` without that argument,
+so the figure was drawn into the HTML report but never written to
+`plots/`. `run_pipeline()` was unaffected — it always passed `filename`.
+
+**Symptom:** every documented plot appears in `plots/` except
+`04_heatmap_top50.png`, with no error or warning.
+
+**Fix:** the template now calls `plot_heatmap()` twice — once without
+`filename` to draw the inline figure, once with it to write the PNG.
+Two calls are required because `pheatmap` writes to file *instead of*
+drawing when `filename` is supplied; a single call with `filename` set
+would save the PNG but remove the heatmap from the HTML report.
+
+**Related:** the same omission affected the two QC figures in the
+template — `plot_sample_qc()` and `plot_antibody_qc()` were drawn inline
+but had no `save_plot()` call, so the RMarkdown path wrote 8 of its 10
+figures to disk. Both now save as `sample_QC.png` and `antibody_QC.png`.
+If you add a plot to the template, remember that drawing it and saving it
+are separate steps.
+
+### Issue 10 — Metadata column leaking into the expression matrix
+
+**Cause:** `get_expression_matrix()` separates protein columns from sample
+metadata by matching column names against a fixed list. That list contained
+`"Sample Source"` with a space, but `import_rppa()` renames the column to
+`"Sample_Source"` with an underscore. The names never matched, so the
+metadata column was treated as a protein.
+
+**Symptoms:** a `NAs introduced by coercion` warning on every call, because
+the column holds text; one entirely `NA` column in the returned matrix; and
+`ncol()` reporting 497 after QC had retained 496 — the 496 real proteins plus
+the stray metadata column.
+
+**Impact:** results were not affected in practice. `sort()` drops `NA` when
+ranking proteins by variance, and `plot_heatmap()` receives its protein list
+explicitly. However, any user-side `rowMeans()`, `cor()`, or `apply()` over
+the full matrix would silently return `NA`, and the reported dimensions were
+misleading.
+
+**Fix:** corrected to `"Sample_Source"`. The same list is duplicated in
+`03_differential.R` and `04_visualize.R`; both were fixed. If you add a
+metadata column to the importer, add it to both lists — a name that does not
+match is silently treated as protein data rather than raising an error.
+
+---
+
 ## Troubleshooting Tips
 
 **Find your Mac username:**
@@ -465,53 +516,3 @@ Please also acknowledge the MD Anderson RPPA Core:
 Email: amarcompbio@gmail.com  
 Issues and pull requests welcome:
 [https://github.com/akumar901/RPPAnalyzeR/issues](https://github.com/akumar901/RPPAnalyzeR/issues)
-
-### Issue 9 — Heatmap PNG not written by the RMarkdown template
-
-**Cause:** `plot_heatmap()` wraps `pheatmap`, which does not return a
-ggplot object and therefore cannot be saved with `save_plot()`. It takes
-its own `filename` argument instead. The heatmap chunk in
-`RPPAnalyzeR_Analysis.Rmd` called `plot_heatmap()` without that argument,
-so the figure was drawn into the HTML report but never written to
-`plots/`. `run_pipeline()` was unaffected — it always passed `filename`.
-
-**Symptom:** every documented plot appears in `plots/` except
-`04_heatmap_top50.png`, with no error or warning.
-
-**Fix:** the template now calls `plot_heatmap()` twice — once without
-`filename` to draw the inline figure, once with it to write the PNG.
-Two calls are required because `pheatmap` writes to file *instead of*
-drawing when `filename` is supplied; a single call with `filename` set
-would save the PNG but remove the heatmap from the HTML report.
-
-**Related:** the same omission affected the two QC figures in the
-template — `plot_sample_qc()` and `plot_antibody_qc()` were drawn inline
-but had no `save_plot()` call, so the RMarkdown path wrote 8 of its 10
-figures to disk. Both now save as `sample_QC.png` and `antibody_QC.png`.
-If you add a plot to the template, remember that drawing it and saving it
-are separate steps.
-
-### Issue 10 — Metadata column leaking into the expression matrix
-
-**Cause:** `get_expression_matrix()` separates protein columns from sample
-metadata by matching column names against a fixed list. That list contained
-`"Sample Source"` with a space, but `import_rppa()` renames the column to
-`"Sample_Source"` with an underscore. The names never matched, so the
-metadata column was treated as a protein.
-
-**Symptoms:** a `NAs introduced by coercion` warning on every call, because
-the column holds text; one entirely `NA` column in the returned matrix; and
-`ncol()` reporting 497 after QC had retained 496 — the 496 real proteins plus
-the stray metadata column.
-
-**Impact:** results were not affected in practice. `sort()` drops `NA` when
-ranking proteins by variance, and `plot_heatmap()` receives its protein list
-explicitly. However, any user-side `rowMeans()`, `cor()`, or `apply()` over
-the full matrix would silently return `NA`, and the reported dimensions were
-misleading.
-
-**Fix:** corrected to `"Sample_Source"`. The same list is duplicated in
-`03_differential.R` and `04_visualize.R`; both were fixed. If you add a
-metadata column to the importer, add it to both lists — a name that does not
-match is silently treated as protein data rather than raising an error.
-
