@@ -15,7 +15,7 @@
 #' @export
 get_expression_matrix <- function(rppa, sheet = "l4_log2") {
   dat <- rppa[[sheet]]
-  meta_cols <- c("Order", "Sample Source", "Category_1", "Category_2",
+  meta_cols <- c("Order", "Sample_Source", "Category_1", "Category_2",
                  "Category_3", "Sample", "Sample_Name", "Sample_Description",
                  "Sample_Type", "Timepoint", "Replicate")
   meta_cols <- intersect(meta_cols, colnames(dat))

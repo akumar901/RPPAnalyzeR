@@ -490,3 +490,28 @@ but had no `save_plot()` call, so the RMarkdown path wrote 8 of its 10
 figures to disk. Both now save as `sample_QC.png` and `antibody_QC.png`.
 If you add a plot to the template, remember that drawing it and saving it
 are separate steps.
+
+### Issue 10 — Metadata column leaking into the expression matrix
+
+**Cause:** `get_expression_matrix()` separates protein columns from sample
+metadata by matching column names against a fixed list. That list contained
+`"Sample Source"` with a space, but `import_rppa()` renames the column to
+`"Sample_Source"` with an underscore. The names never matched, so the
+metadata column was treated as a protein.
+
+**Symptoms:** a `NAs introduced by coercion` warning on every call, because
+the column holds text; one entirely `NA` column in the returned matrix; and
+`ncol()` reporting 497 after QC had retained 496 — the 496 real proteins plus
+the stray metadata column.
+
+**Impact:** results were not affected in practice. `sort()` drops `NA` when
+ranking proteins by variance, and `plot_heatmap()` receives its protein list
+explicitly. However, any user-side `rowMeans()`, `cor()`, or `apply()` over
+the full matrix would silently return `NA`, and the reported dimensions were
+misleading.
+
+**Fix:** corrected to `"Sample_Source"`. The same list is duplicated in
+`03_differential.R` and `04_visualize.R`; both were fixed. If you add a
+metadata column to the importer, add it to both lists — a name that does not
+match is silently treated as protein data rather than raising an error.
+

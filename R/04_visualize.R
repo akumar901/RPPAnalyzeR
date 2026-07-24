@@ -31,7 +31,7 @@ plot_heatmap <- function(rppa,
   sinfo <- rppa$sample_info
 
   # Build expression matrix
-  meta_cols <- c("Order", "Sample Source", "Category_1", "Category_2",
+  meta_cols <- c("Order", "Sample_Source", "Category_1", "Category_2",
                  "Category_3", "Sample", "Sample_Name", "Sample_Description",
                  "Sample_Type", "Timepoint", "Replicate")
   meta_cols  <- intersect(meta_cols, colnames(dat))

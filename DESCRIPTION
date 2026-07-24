@@ -1,6 +1,6 @@
 Package: RPPAnalyzeR
 Title: RPPA Data Analysis Pipeline for MD Anderson RPPA Core Output
-Version: 0.1.1
+Version: 0.1.2
 Authors@R: 
     person("Amar", "Kumar", email = "amarcompbio@gmail.com", role = c("aut", "cre"))
 Description: A complete analysis pipeline for Reverse Phase Protein Array (RPPA) data
