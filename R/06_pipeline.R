@@ -110,7 +110,7 @@ run_pipeline <- function(xlsx_path,
   mat   <- expr$matrix
   vars  <- apply(mat, 2, var, na.rm = TRUE)
   top50 <- names(sort(vars, decreasing = TRUE))[1:min(50, length(vars))]
-  top50_clean <- stringr::str_remove(top50, "-[RMG]-[VCE]$")
+  top50_clean <- stringr::str_remove(top50, "-[RMG]-[VCEQq]$")
   path_hm <- file.path(plots_dir, "04_heatmap_top50.png")
   plot_heatmap(rppa, proteins = top50_clean,
                title    = "Top 50 Most Variable Proteins (L4 CHM)",
@@ -122,7 +122,7 @@ run_pipeline <- function(xlsx_path,
   if (is.null(key_proteins)) {
     de_24h <- dplyr::filter(de_all, Timepoint == "24h")
     key_proteins <- top_proteins(de_24h, n = 6) %>% dplyr::pull(Protein)
-    key_proteins <- stringr::str_remove(key_proteins, "-[RMG]-[VCE]$")
+    key_proteins <- stringr::str_remove(key_proteins, "-[RMG]-[VCEQq]$")
   }
   if (length(key_proteins) > 0) {
     p_tc <- plot_timecourse(rppa, proteins = key_proteins)

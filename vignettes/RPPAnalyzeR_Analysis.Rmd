@@ -119,7 +119,9 @@ rppa$metadata %>%
 Total protein content reflects the average signal of a sample across all antibodies. Values below log2 = −3 are flagged as unreliable by MD Anderson and should be excluded.
 
 ```{r sample_qc_plot, fig.height=5, fig.cap="Total protein content per sample. Red dashed line = exclusion threshold (log2 < -3)."}
-plot_sample_qc(rppa)
+p_sqc <- plot_sample_qc(rppa)
+print(p_sqc)
+save_plot(p_sqc, file.path(output_dir, "plots", "sample_QC.png"), width = 10, height = 5)
 ```
 
 ```{r sample_qc_table}
@@ -138,7 +140,9 @@ rppa$sample_qc %>%
 QC scores range from 0 (worst) to 1 (best). MD Anderson requires a minimum score of 0.8 for inclusion.
 
 ```{r antibody_qc_plot, fig.height=5, fig.cap="Distribution of antibody QC scores. Red dashed line = minimum threshold (0.8)."}
-plot_antibody_qc(rppa)
+p_aqc <- plot_antibody_qc(rppa)
+print(p_aqc)
+save_plot(p_aqc, file.path(output_dir, "plots", "antibody_QC.png"), width = 8, height = 5)
 ```
 
 ## 3.3 Apply QC filters
@@ -282,10 +286,21 @@ vars  <- apply(expr$matrix, 2, var, na.rm = TRUE)
 top50 <- names(sort(vars, decreasing = TRUE))[1:50]
 top50_clean <- stringr::str_remove(top50, "-[RMG]-[VCE]$")
 
+# Draw the heatmap inline in this report
 plot_heatmap(
   rppa,
   proteins = top50_clean,
   title    = "Top 50 Most Variable Proteins — MCF7 Serum Starvation (L4 CHM)"
+)
+
+# Save a copy to plots/. Note: pheatmap writes to file *instead of* drawing when
+# `filename` is supplied, so the call above is needed for the inline figure and
+# this second call is needed for the saved PNG.
+plot_heatmap(
+  rppa,
+  proteins = top50_clean,
+  title    = "Top 50 Most Variable Proteins — MCF7 Serum Starvation (L4 CHM)",
+  filename = file.path(output_dir, "plots", "04_heatmap_top50.png")
 )
 ```
 

@@ -350,10 +350,17 @@ handle all three validation codes:
 - **Q** — Tissue-reactive
 
 **Important note for users:** If you modify the protein name matching
-regex in `diff_expression()`, ensure it covers all three validation
-codes (V, C, Q). Missing any one code will silently exclude the
-affected antibodies from DE results without any error message,
-potentially affecting your significant hits list.
+regex, ensure it covers all three validation codes (V, C, Q). Missing
+any one code will silently exclude the affected antibodies without any
+error message.
+
+**This regex appears in more than one file.** It is used in
+`03_differential.R` (DE filtering) and twice in `06_pipeline.R` (top-50
+selection for the heatmap, and automatic key-protein selection for the
+time-course). Fixing only one location leaves the others broken —
+`run_pipeline()` carried the old `-[RMG]-[VCE]$` pattern for one release
+after `diff_expression()` was corrected. Search the whole `R/` directory
+when changing it.
 
 ---
 
@@ -405,10 +412,26 @@ output_dir/
     ├── 03_volcano_0h_vs_8h.png     Volcano plot: 0h vs 8h
     ├── 03_volcano_0h_vs_24h.png    Volcano plot: 0h vs 24h
     ├── 04_heatmap_top50.png        Clustered heatmap top 50 proteins
-    ├── 05_timecourse_mTOR_PI3K.png mTOR and PI3K pathway time-course
-    ├── 05_timecourse_MAPK_ERK.png  MAPK and ERK pathway time-course
-    └── 05_timecourse_CellCycle.png Cell cycle and apoptosis time-course
+    └── 05_timecourse_key_proteins.png  Time-course of the top 6 hits at the
+                                        final time point
 ```
+
+`run_pipeline()` selects the time-course proteins automatically (the six most
+significant hits at the last time point). To plot specific pathways instead,
+pass them explicitly:
+
+```r
+run_pipeline(
+  xlsx_path    = "your_rppa_file.xlsx",
+  output_dir   = "rppa_output",
+  key_proteins = c("Akt_pS473", "p70-S6K_pT389", "MAPK_pT202_Y204")
+)
+```
+
+The RMarkdown template (`vignettes/RPPAnalyzeR_Analysis.Rmd`) instead produces
+three curated pathway panels — `timecourse_mTOR_PI3K.png`,
+`timecourse_MAPK_ERK.png` and `timecourse_CellCycle.png` — because the protein
+sets are hard-coded in that file. Edit those chunks to change the panels.
 
 ---
 
@@ -424,7 +447,7 @@ If you use it in a publication, a citation is appreciated.
 ## Citation
 
 ```
-Kumar A (2026). RPPAnalyzeR: A complete R analysis pipeline for
+Kumar A (2025). RPPAnalyzeR: A complete R analysis pipeline for
 MD Anderson RPPA Core output. R package version 0.1.0.
 https://github.com/akumar901/RPPAnalyzeR
 ```
@@ -442,3 +465,28 @@ Please also acknowledge the MD Anderson RPPA Core:
 Email: amarcompbio@gmail.com  
 Issues and pull requests welcome:
 [https://github.com/akumar901/RPPAnalyzeR/issues](https://github.com/akumar901/RPPAnalyzeR/issues)
+
+### Issue 9 — Heatmap PNG not written by the RMarkdown template
+
+**Cause:** `plot_heatmap()` wraps `pheatmap`, which does not return a
+ggplot object and therefore cannot be saved with `save_plot()`. It takes
+its own `filename` argument instead. The heatmap chunk in
+`RPPAnalyzeR_Analysis.Rmd` called `plot_heatmap()` without that argument,
+so the figure was drawn into the HTML report but never written to
+`plots/`. `run_pipeline()` was unaffected — it always passed `filename`.
+
+**Symptom:** every documented plot appears in `plots/` except
+`04_heatmap_top50.png`, with no error or warning.
+
+**Fix:** the template now calls `plot_heatmap()` twice — once without
+`filename` to draw the inline figure, once with it to write the PNG.
+Two calls are required because `pheatmap` writes to file *instead of*
+drawing when `filename` is supplied; a single call with `filename` set
+would save the PNG but remove the heatmap from the HTML report.
+
+**Related:** the same omission affected the two QC figures in the
+template — `plot_sample_qc()` and `plot_antibody_qc()` were drawn inline
+but had no `save_plot()` call, so the RMarkdown path wrote 8 of its 10
+figures to disk. Both now save as `sample_QC.png` and `antibody_QC.png`.
+If you add a plot to the template, remember that drawing it and saving it
+are separate steps.
